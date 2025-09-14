@@ -33,7 +33,7 @@ def load_bytes(path: Path) -> bytes:
 
 def resume_bytes():
     """Load resume PDF if available"""
-    f = asset("Abhisekh_Resume.pdf")
+    f = asset("Resume.pdf")
     return load_bytes(f) if f.exists() else None
 
 def add_bg_from_local(image_file):
@@ -861,3 +861,4 @@ with tab10:
     st.subheader("Download Simulated Dataset")
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button("⬇️ Download Mission Definition Review (MDR)", data=csv, file_name="MDR.pdf", mime="text/pdf")
+
