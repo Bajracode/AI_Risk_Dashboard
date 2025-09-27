@@ -4,6 +4,7 @@ import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 # === PAGE CONFIG ===
 st.set_page_config(page_title="AI Risk Intelligence Dashboard", layout="wide")
@@ -58,20 +59,21 @@ if df.empty:
     st.info("No data available yet. Please upload a CSV or choose a sample dataset.")
     st.stop()
 
-# === MODEL SELECTION ===
-st.subheader("⚙️ Anomaly Detection Settings")
-model_choice = st.selectbox("Choose Model", ["Isolation Forest", "Local Outlier Factor"])
-
-# Run anomaly detection
-numeric_df = df.select_dtypes(include=[np.number])
+# === MODEL SETTINGS (SIDEBAR) ===
+st.sidebar.header("⚙️ Model Settings")
+model_choice = st.sidebar.selectbox("Choose Model", ["Isolation Forest", "Local Outlier Factor"])
 
 if model_choice == "Isolation Forest":
-    model = IsolationForest(contamination=0.05, random_state=42)
-    preds = model.fit_predict(numeric_df)
+    contamination = st.sidebar.slider("Contamination (%)", 1, 20, 5) / 100
+    n_estimators = st.sidebar.slider("Number of Estimators", 50, 500, 100)
+    model = IsolationForest(contamination=contamination, n_estimators=n_estimators, random_state=42)
+    preds = model.fit_predict(df.select_dtypes(include=[np.number]))
 else:
-    n_neighbors = min(20, max(2, len(df) - 1))  # adjust for small datasets
-    model = LocalOutlierFactor(n_neighbors=n_neighbors, contamination=0.05)
-    preds = model.fit_predict(numeric_df)
+    contamination = st.sidebar.slider("Contamination (%)", 1, 20, 5) / 100
+    n_neighbors = st.sidebar.slider("n_neighbors", 5, 50, 20)
+    n_neighbors = min(n_neighbors, max(2, len(df) - 1))
+    model = LocalOutlierFactor(n_neighbors=n_neighbors, contamination=contamination)
+    preds = model.fit_predict(df.select_dtypes(include=[np.number]))
 
 df["Anomaly"] = np.where(preds == -1, "Yes", "No")
 
@@ -86,10 +88,62 @@ col1.metric("Total Records", total_rows)
 col2.metric("Anomalies Detected", anomalies)
 col3.metric("Anomaly %", f"{anomaly_pct:.2f}%")
 
+# === ADVANCED INSIGHTS ===
+st.subheader("🔍 Advanced Insights")
+
+# Top 10 anomalies (highest amounts)
+if "transaction_amount" in df.columns:
+    st.markdown("**Top 10 Anomalies by Transaction Amount**")
+    st.dataframe(df[df["Anomaly"] == "Yes"].nlargest(10, "transaction_amount"))
+
+# Merchant risk score
+if "merchant_id" in df.columns:
+    st.markdown("**Merchant Risk Score (Anomalies per Merchant)**")
+    merchant_risk = df.groupby("merchant_id")["Anomaly"].apply(lambda x: (x == "Yes").sum())
+    st.dataframe(merchant_risk.sort_values(ascending=False).head(10))
+
+# Time heatmap
+if "transaction_time" in df.columns:
+    st.markdown("**Anomaly Heatmap by Transaction Time**")
+    heatmap_data = df.pivot_table(index="transaction_time", columns="Anomaly", aggfunc="size", fill_value=0)
+    fig, ax = plt.subplots(figsize=(8, 4))
+    sns.heatmap(heatmap_data, annot=True, fmt="d", cmap="coolwarm", ax=ax)
+    st.pyplot(fig)
+
+# === INTERACTIVITY ===
+st.subheader("🎛️ Interactivity")
+
+# Merchant filter
+if "merchant_id" in df.columns:
+    merchants = st.multiselect("Filter by Merchant ID", options=df["merchant_id"].unique())
+    if merchants:
+        df = df[df["merchant_id"].isin(merchants)]
+
+# Transaction amount filter
+if "transaction_amount" in df.columns:
+    min_val, max_val = st.slider("Transaction Amount Range", float(df["transaction_amount"].min()), float(df["transaction_amount"].max()), (float(df["transaction_amount"].min()), float(df["transaction_amount"].max())))
+    df = df[(df["transaction_amount"] >= min_val) & (df["transaction_amount"] <= max_val)]
+
+# Date filter (only if a datetime column exists)
+datetime_cols = df.select_dtypes(include=["datetime64[ns]"]).columns
+if len(datetime_cols) > 0:
+    date_col = st.selectbox("Select Date Column", datetime_cols)
+    min_date, max_date = df[date_col].min(), df[date_col].max()
+    date_range = st.date_input("Date Range", (min_date, max_date))
+    if len(date_range) == 2:
+        start_date, end_date = date_range
+        df = df[(df[date_col] >= pd.to_datetime(start_date)) & (df[date_col] <= pd.to_datetime(end_date))]
+
+# Search box (only if transaction_id exists)
+if "transaction_id" in df.columns:
+    search_id = st.text_input("Search Transaction ID")
+    if search_id:
+        st.write(df[df["transaction_id"].astype(str) == search_id])
+
 # === VISUALIZATIONS ===
 st.subheader("📈 Visualizations")
 
-# 1. Scatter plot: Transaction datasets
+# Scatter plot: Transaction datasets
 if {"transaction_time", "transaction_amount"}.issubset(df.columns):
     st.markdown("**Scatter Plot: Transaction Time vs Amount**")
     fig, ax = plt.subplots()
@@ -102,7 +156,7 @@ if {"transaction_time", "transaction_amount"}.issubset(df.columns):
     ax.legend()
     st.pyplot(fig)
 
-# 2. Bar chart: Anomalies per merchant (if available)
+# Bar chart: Anomalies per merchant
 if "merchant_id" in df.columns:
     st.markdown("**Bar Chart: Anomalies per Merchant**")
     counts = df[df["Anomaly"] == "Yes"]["merchant_id"].value_counts()
@@ -113,7 +167,7 @@ if "merchant_id" in df.columns:
         ax.set_xlabel("Merchant ID")
         st.pyplot(fig)
 
-# 3. Time series: anomalies over time
+# Time series
 if "transaction_time" in df.columns:
     st.markdown("**Line Chart: Anomalies over Time**")
     time_series = df.groupby("transaction_time")["Anomaly"].apply(lambda x: (x == "Yes").sum())
@@ -131,7 +185,7 @@ elif "timestamp" in df.columns:
     ax.set_xlabel("Timestamp")
     st.pyplot(fig)
 
-# 4. Pie chart: anomaly distribution
+# Pie chart
 st.markdown("**Pie Chart: Anomaly Distribution**")
 fig, ax = plt.subplots()
 colors = ["blue" if label == "No" else "red" for label in df["Anomaly"].unique()]
@@ -146,4 +200,5 @@ st.dataframe(df)
 # === DOWNLOAD BUTTON ===
 csv = df.to_csv(index=False).encode("utf-8")
 st.download_button("⬇ Download Results", data=csv, file_name="anomaly_results.csv", mime="text/csv")
+
 
